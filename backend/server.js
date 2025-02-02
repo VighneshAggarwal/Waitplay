@@ -4,22 +4,41 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 const crypto = require('crypto');
 const QRCode = require('qrcode');
-const http = require('http'); // Required for integrating Socket.IO
-const { Server } = require('socket.io'); // Socket.IO integration
+const http = require('http');
+const { Server } = require('socket.io');
 dotenv.config();
 
 const app = express();
 
-app.use(cors());
-app.use(express.json());
-const server = http.createServer(app); // Create HTTP server for Socket.IO
-const io = new Server(server); // Initialize Socket.IO
+// CORS Configuration
+app.use(
+  cors({
+    origin: 'http://localhost:3000',
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    credentials: true,
+  })
+);
 
+app.use(express.json());
+
+const server = http.createServer(app);
+
+// Socket.IO Configuration
+const io = new Server(server, {
+  cors: {
+    origin: 'http://localhost:3000',
+    methods: ['GET', 'POST'],
+    credentials: true,
+  },
+});
+
+// MongoDB Connection
 mongoose
-.connect("mongodb+srv://Waitplay:Waitplay@cluster0.u4tx7.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0")
+  .connect('mongodb+srv://Waitplay:Waitplay@cluster0.u4tx7.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0')
   .then(() => console.log('MongoDB Connected'))
   .catch((err) => console.error('MongoDB connection error:', err));
 
+// Schemas and Models
 const productSchema = new mongoose.Schema({
   title: String,
   description: String,
@@ -36,11 +55,10 @@ const productSchema = new mongoose.Schema({
 
 const Product = mongoose.model('Product', productSchema);
 
-//cart schema
 const cartSchema = new mongoose.Schema({
-  cartId: { type: String, unique: true, required: true }, // Unique identifier for the cart
-  createdBy: { type: String, required: true }, // User who created the cart
-  users: [{ type: String }], // List of users who joined the cart
+  cartId: { type: String, unique: true, required: true },
+  createdBy: { type: String, required: true },
+  users: [{ type: String }],
   items: [
     {
       itemName: String,
@@ -53,6 +71,7 @@ const cartSchema = new mongoose.Schema({
 
 const Cart = mongoose.model('Cart', cartSchema);
 
+// Middleware for Logging
 app.use((req, res, next) => {
   console.log(`Received ${req.method} request at ${req.url}`);
   console.log('Request Params:', req.params);
@@ -60,22 +79,13 @@ app.use((req, res, next) => {
   next();
 });
 
-
-// Listen for Socket.IO connections
+// Socket.IO Events
 io.on('connection', (socket) => {
   console.log('A user connected:', socket.id);
 
-  // Join a specific cart room
   socket.on('join-cart', (cartId) => {
     socket.join(cartId);
     console.log(`User joined cart room: ${cartId}`);
-  });
-
-  socket.on('cart-updated', (updatedCart) => {
-    if (updatedCart.cartId === joinCartId) {
-      setCartData(updatedCart); // Sync cart data
-      setCart(updatedCart.items); // Sync items in the local cart
-    }
   });
 
   socket.on('update-cart', async (data) => {
@@ -96,20 +106,19 @@ io.on('connection', (socket) => {
       }
 
       await cart.save();
-      io.to(cartId).emit('cart-updated', cart); // Broadcast the updated cart
+      io.to(cartId).emit('cart-updated', cart);
     } catch (error) {
       console.error('Error updating cart:', error);
+      socket.emit('error', { message: 'Failed to update cart', error: error.message });
     }
   });
-  
 
-  // Handle disconnection
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
   });
 });
 
-// Fetch products with optional filter by type and category
+// Routes
 app.get('/products', async (req, res) => {
   try {
     const { type, category } = req.query;
@@ -139,27 +148,25 @@ app.get('/categories', async (req, res) => {
   }
 });
 
-// Search products by title
 app.get('/api/search', async (req, res) => {
   try {
-    const query = req.query.q; // Get search query from request
-    const results = await Product.find({ title: { $regex: query, $options: 'i' } }); // Case-insensitive search
+    const query = req.query.q;
+    const results = await Product.find({ title: { $regex: query, $options: 'i' } });
     res.json(results);
   } catch (error) {
     res.status(500).json({ message: 'Error fetching search results', error: error.message });
   }
 });
 
-// Create a new cart and generate QR code
 app.post('/create-cart', async (req, res) => {
   try {
     const { userId } = req.body;
-    const cartId = crypto.randomBytes(4).toString('hex'); // Generate a unique cart ID
+    const cartId = crypto.randomBytes(4).toString('hex');
 
     const newCart = new Cart({
       cartId,
       createdBy: userId,
-      users: [userId], // Add the creator as the first user
+      users: [userId],
     });
 
     await newCart.save();
@@ -171,8 +178,6 @@ app.post('/create-cart', async (req, res) => {
   }
 });
 
-// Join an existing cart
-// In the /join-cart API endpoint
 app.post('/join-cart', async (req, res) => {
   try {
     const { cartId, userId } = req.body;
@@ -187,12 +192,7 @@ app.post('/join-cart', async (req, res) => {
       await cart.save();
     }
 
-    // Notify other users in the cart room
     io.to(cartId).emit('cart-updated', cart);
-
-    // Add the user to the Socket.IO room
-    io.emit('join-cart', { cartId, userId });
-
     res.status(200).json({ message: 'Successfully joined the cart', cartId });
   } catch (error) {
     res.status(500).json({ message: 'Error joining cart', error: error.message });
@@ -202,39 +202,32 @@ app.post('/join-cart', async (req, res) => {
 app.post('/cart/:cartId/add-item', async (req, res) => {
   const { cartId } = req.params;
   if (!cartId) {
-      console.error('Cart ID is missing in the request.');
-      return res.status(400).json({ message: 'Cart ID is required.' });
+    return res.status(400).json({ message: 'Cart ID is required.' });
   }
 
   try {
-      const { itemName, quantity, addedBy } = req.body;
+    const { itemName, quantity, addedBy } = req.body;
 
-      const cart = await Cart.findOne({ cartId });
-      if (!cart) {
-          console.error(`Cart not found for ID: ${cartId}`);
-          return res.status(404).json({ message: 'Cart not found' });
-      }
+    const cart = await Cart.findOne({ cartId });
+    if (!cart) {
+      return res.status(404).json({ message: 'Cart not found' });
+    }
 
-      // Process the cart update
-      const existingItem = cart.items.find((item) => item.itemName === itemName);
-      if (existingItem) {
-          existingItem.quantity += quantity;
-      } else {
-          cart.items.push({ itemName, quantity, addedBy });
-      }
+    const existingItem = cart.items.find((item) => item.itemName === itemName);
+    if (existingItem) {
+      existingItem.quantity += quantity;
+    } else {
+      cart.items.push({ itemName, quantity, addedBy });
+    }
 
-      await cart.save();
-      io.to(cartId).emit('cart-updated', cart); // Notify other users in the cart
-      res.status(200).json({ message: 'Item added to cart', cart });
+    await cart.save();
+    io.to(cartId).emit('cart-updated', cart);
+    res.status(200).json({ message: 'Item added to cart', cart });
   } catch (error) {
-      console.error('Error adding item to cart:', error.message);
-      res.status(500).json({ message: 'Error adding item to cart', error: error.message });
+    res.status(500).json({ message: 'Error adding item to cart', error: error.message });
   }
 });
 
-
-
-// Retrieve cart details
 app.get('/cart/:cartId', async (req, res) => {
   try {
     const { cartId } = req.params;
@@ -250,5 +243,6 @@ app.get('/cart/:cartId', async (req, res) => {
   }
 });
 
+// Start Server
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+server.listen(PORT, () => console.log(`Server running on port ${PORT}`));

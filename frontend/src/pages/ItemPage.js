@@ -126,35 +126,34 @@ const ItemsPage = () => {
         return () => clearInterval(interval); // Cleanup on unmount
       }, [index, products]);  
     
-    //   useEffect(() => {
-    //     if (joinCartId) {
-    //       // Join the cart room
-    //       socket.emit('join-cart', joinCartId);
+      useEffect(() => {
+        if (joinCartId) {
+          // Join the cart room
+          socket.emit('join-cart', joinCartId);
       
-    //       // Listen for cart updates
-    //       socket.on('cart-updated', (updatedCart) => {
-    //         if (updatedCart.cartId === joinCartId) {
-    //           setCartData(updatedCart);
-    //           setCart(updatedCart.items);
-    //         }
-    //       });
+          // Listen for cart updates
+          socket.on('cart-updated', (updatedCart) => {
+            if (updatedCart.cartId === joinCartId) {
+              setCartData(updatedCart);
+              setCart(updatedCart.items);
+            }
+          });
       
-    //       // Cleanup on component unmount
-    //       return () => {
-    //         socket.off('cart-updated');
-    //       };
-    //     }
-    //   }, [joinCartId, socket]);
+          // Cleanup on component unmount
+          return () => {
+            socket.off('cart-updated');
+          };
+        }
+      }, [joinCartId, socket]);
 
     // React client-side code
-    useEffect(() => {
-        const socket = io('http://localhost:5000'); // Connect to the Socket.IO server
-    
+    useEffect(() => {  
         // Join the cart room
-        socket.emit('join-cart', { cartId: 'your-cart-id' });
+        socket.emit('join-cart', { cartId: `${joinCartId}` });
     
         // Listen for cart updates
         socket.on('cart-updated', (updatedCart) => {
+        console.log(updatedCart.items);
         setCart(updatedCart.items); // Update the local cart state
         });
     
